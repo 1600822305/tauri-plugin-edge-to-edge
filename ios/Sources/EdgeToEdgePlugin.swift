@@ -137,7 +137,7 @@ class EdgeToEdgePlugin: Plugin {
         webview.scrollView.scrollIndicatorInsets = .zero
     }
     
-    /// 键盘将要显示（借鉴 Capacitor Keyboard 插件）
+    /// 键盘将要显示（借鉴 NextChat 平滑处理 + Capacitor 官方 Keyboard 插件）
     private func handleKeyboardWillShow(webview: WKWebView, notification: Notification) {
         // 取消隐藏定时器
         hideTimer?.invalidate()
@@ -166,10 +166,9 @@ class EdgeToEdgePlugin: Plugin {
         keyboardHeight = height
         isKeyboardVisible = true
         
-        // 重置 ScrollView
-        resetScrollView(webview: webview)
-        
         NSLog("[EdgeToEdge] Keyboard will show - Height: \(height)")
+        
+        // 温和的重置：只在键盘完全显示时重置，减少动画期间的干扰
         injectSafeAreaInsets(webview: webview, keyboardHeight: height, keyboardVisible: true)
     }
     
@@ -264,7 +263,16 @@ class EdgeToEdgePlugin: Plugin {
         let right = safeArea.right
         let bottom = safeArea.bottom
         let left = safeArea.left
-        let computedBottom = max(bottom, 34.0)
+        
+        // 键盘显示时，底部使用实际安全区域；键盘隐藏时，确保最小安全区域
+        let computedBottom: CGFloat
+        if keyboardVisible {
+            // 键盘显示时：紧贴输入框，不添加额外 padding
+            computedBottom = bottom
+        } else {
+            // 键盘隐藏时：确保最小安全区域（iPhone X 等有 Home Indicator）
+            computedBottom = max(bottom, 34.0)
+        }
         
         let jsCode = """
         (function() {
@@ -275,15 +283,15 @@ class EdgeToEdgePlugin: Plugin {
             style.setProperty('--safe-area-inset-left', '\(left)px');
             style.setProperty('--safe-area-top', '\(top)px');
             style.setProperty('--safe-area-right', '\(right)px');
-            style.setProperty('--safe-area-bottom', '\(bottom)px');
+            style.setProperty('--safe-area-bottom', '\(computedBottom)px');
             style.setProperty('--safe-area-left', '\(left)px');
             style.setProperty('--safe-area-bottom-computed', '\(computedBottom)px');
             style.setProperty('--safe-area-bottom-min', '34px');
-            style.setProperty('--content-bottom-padding', '\(computedBottom + 16)px');
+            style.setProperty('--content-bottom-padding', '\(computedBottom)px');
             style.setProperty('--keyboard-height', '\(keyboardHeight)px');
             style.setProperty('--keyboard-visible', '\(keyboardVisible ? "1" : "0")');
             window.dispatchEvent(new CustomEvent('safeAreaChanged', {
-                detail: { top: \(top), right: \(right), bottom: \(bottom), left: \(left), keyboardHeight: \(keyboardHeight), keyboardVisible: \(keyboardVisible) }
+                detail: { top: \(top), right: \(right), bottom: \(computedBottom), left: \(left), keyboardHeight: \(keyboardHeight), keyboardVisible: \(keyboardVisible) }
             }));
         })();
         """
