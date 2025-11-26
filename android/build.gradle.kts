@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.plugin.edge-to-edge"
+    namespace = "com.plugin.edgetoedge"
     compileSdk = 36
 
     defaultConfig {
