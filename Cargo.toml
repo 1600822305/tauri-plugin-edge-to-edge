@@ -1,6 +1,6 @@
 [package]
 name = "tauri-plugin-edge-to-edge"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["1600822305 <1600822305@qq.com>"]
 license = "MIT"
