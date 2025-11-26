@@ -7,7 +7,7 @@ import WebKit
 // 为 iOS 提供全屏沉浸式体验支持
 // 借鉴 Capacitor 官方 Keyboard 插件的实现逻辑
 
-class EdgeToEdgePlugin: Plugin {
+class EdgeToEdgePlugin: Plugin, UIScrollViewDelegate {
     private var isSetup = false
     private weak var webviewRef: WKWebView?
     private var keyboardHeight: CGFloat = 0
@@ -56,12 +56,16 @@ class EdgeToEdgePlugin: Plugin {
         // 3. 禁用滚动视图的自动 inset 调整
         webview.scrollView.automaticallyAdjustsScrollIndicatorInsets = false
         
-        // 4. 设置窗口背景色（支持深色模式）
+        // 4. 参考 eunjios/ios-webview-keyboard-demo：防止键盘跳动
+        webview.scrollView.bounces = false
+        webview.scrollView.delegate = self
+        
+        // 5. 设置窗口背景色（支持深色模式）
         DispatchQueue.main.async {
             self.setupWindowBackground(webview: webview)
         }
         
-        NSLog("[EdgeToEdge] Edge-to-edge mode enabled")
+        NSLog("[EdgeToEdge] Edge-to-edge mode enabled with scroll lock")
     }
     
     /// 设置窗口背景色
@@ -368,6 +372,16 @@ class EdgeToEdgePlugin: Plugin {
             self?.webviewRef?.endEditing(true)
         }
         invoke.resolve()
+    }
+    
+    // MARK: - UIScrollViewDelegate (参考 eunjios/ios-webview-keyboard-demo)
+    
+    /// 锁定 WebView 滚动位置，防止键盘跳动
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // 将滚动位置锁定为 (0, 0)，防止键盘引起的页面跳动
+        if scrollView.contentOffset != .zero {
+            scrollView.contentOffset = .zero
+        }
     }
     
     deinit {
