@@ -14,6 +14,8 @@ class EdgeToEdgePlugin: Plugin {
     private var isKeyboardVisible = false
     private var hideTimer: Timer?
     private var stageManagerOffset: CGFloat = 0  // iPad Stage Manager 支持
+    private var keyboardStateVersion: Int = 0  // 状态版本号，用于取消过期的回调
+    private var periodicInjectionCompleted = false  // 周期性注入是否完成
     
     // MARK: - Lifecycle
     
@@ -143,6 +145,10 @@ class EdgeToEdgePlugin: Plugin {
         hideTimer?.invalidate()
         hideTimer = nil
         
+        // 增加状态版本号，取消之前的延迟回调
+        keyboardStateVersion += 1
+        let currentVersion = keyboardStateVersion
+        
         guard let userInfo = notification.userInfo,
               let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         
@@ -173,16 +179,11 @@ class EdgeToEdgePlugin: Plugin {
         injectSafeAreaInsets(webview: webview, keyboardHeight: height, keyboardVisible: true)
         
         // 延迟再次重置，防止系统覆盖（修复跳动问题）
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak webview] in
+        // 使用版本号检查，如果状态已改变则取消
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self, weak webview] in
             guard let self = self, let wv = webview else { return }
+            guard self.keyboardStateVersion == currentVersion else { return }  // 状态已改变，取消
             self.resetScrollView(webview: wv)
-            self.injectSafeAreaInsets(webview: wv, keyboardHeight: height, keyboardVisible: true)
-        }
-        
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak webview] in
-            guard let self = self, let wv = webview else { return }
-            self.resetScrollView(webview: wv)
-            self.injectSafeAreaInsets(webview: wv, keyboardHeight: height, keyboardVisible: true)
         }
     }
     
@@ -191,30 +192,32 @@ class EdgeToEdgePlugin: Plugin {
         // 重置 ScrollView
         resetScrollView(webview: webview)
         
-        NSLog("[EdgeToEdge] Keyboard did show")
-        injectSafeAreaInsets(webview: webview, keyboardHeight: keyboardHeight, keyboardVisible: true)
+        NSLog("[EdgeToEdge] Keyboard did show - Final height: \(keyboardHeight)")
+        // 只在键盘确实显示时注入一次
+        if isKeyboardVisible {
+            injectSafeAreaInsets(webview: webview, keyboardHeight: keyboardHeight, keyboardVisible: true)
+        }
     }
     
     /// 键盘将要隐藏（借鉴 Capacitor Keyboard 插件）
     private func handleKeyboardWillHide(webview: WKWebView, notification: Notification) {
+        // 增加状态版本号，取消之前的延迟回调
+        keyboardStateVersion += 1
+        
         keyboardHeight = 0
         isKeyboardVisible = false
         
         // 重置 ScrollView
         resetScrollView(webview: webview)
         
-        // 使用定时器延迟触发（借鉴 Capacitor Keyboard 插件）
-        hideTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: false) { [weak self, weak webview] _ in
-            guard let self = self, let wv = webview else { return }
-            self.injectSafeAreaInsets(webview: wv, keyboardHeight: 0, keyboardVisible: false)
-        }
-        RunLoop.current.add(hideTimer!, forMode: .common)
-        
         NSLog("[EdgeToEdge] Keyboard will hide")
+        injectSafeAreaInsets(webview: webview, keyboardHeight: 0, keyboardVisible: false)
     }
     
     /// 键盘已经隐藏 - 关键：重新恢复 Edge-to-Edge 设置
     private func handleKeyboardDidHide(webview: WKWebView, notification: Notification) {
+        let currentVersion = keyboardStateVersion
+        
         // 重置 Stage Manager offset
         stageManagerOffset = 0
         
@@ -226,20 +229,17 @@ class EdgeToEdgePlugin: Plugin {
         
         NSLog("[EdgeToEdge] Keyboard did hide - Edge-to-Edge restored")
         
-        // 注入安全区域
-        injectSafeAreaInsets(webview: webview, keyboardHeight: 0, keyboardVisible: false)
-        
-        // 延迟再次注入，确保状态完全恢复
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak webview] in
-            guard let self = self, let wv = webview else { return }
-            self.resetScrollView(webview: wv)
-            self.injectSafeAreaInsets(webview: wv, keyboardHeight: 0, keyboardVisible: false)
+        // 只在键盘确实隐藏时注入
+        if !isKeyboardVisible {
+            injectSafeAreaInsets(webview: webview, keyboardHeight: 0, keyboardVisible: false)
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self, weak webview] in
+        // 延迟恢复，使用版本号检查
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak webview] in
             guard let self = self, let wv = webview else { return }
+            guard self.keyboardStateVersion == currentVersion else { return }  // 状态已改变，取消
             self.resetScrollView(webview: wv)
-            self.injectSafeAreaInsets(webview: wv, keyboardHeight: 0, keyboardVisible: false)
+            self.restoreEdgeToEdge(webview: wv)
         }
     }
     
@@ -259,10 +259,18 @@ class EdgeToEdgePlugin: Plugin {
     // MARK: - Periodic Injection
     
     private func startPeriodicInjection(webview: WKWebView) {
+        // 只在前5秒进行周期性注入，之后停止
         for i in 1...10 {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.5) { [weak self, weak webview] in
                 guard let self = self, let wv = webview else { return }
-                self.injectSafeAreaInsets(webview: wv, keyboardHeight: 0, keyboardVisible: false)
+                // 只在周期性注入未完成且键盘未显示时注入
+                guard !self.periodicInjectionCompleted && !self.isKeyboardVisible else { return }
+                self.injectSafeAreaInsets(webview: wv, keyboardHeight: self.keyboardHeight, keyboardVisible: self.isKeyboardVisible)
+                
+                // 最后一次注入后标记完成
+                if i == 10 {
+                    self.periodicInjectionCompleted = true
+                }
             }
         }
     }
