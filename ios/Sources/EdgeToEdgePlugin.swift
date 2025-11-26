@@ -35,9 +35,10 @@ class EdgeToEdgePlugin: Plugin {
         webview.backgroundColor = .clear
         webview.scrollView.backgroundColor = .clear
         
-        // 2. 禁用 ScrollView 自动安全区域调整
+        // 2. 设置 ScrollView 安全区域调整行为
+        // 使用 .automatic 保持键盘的正常适应行为，但通过 CSS 变量手动控制安全区域
         if #available(iOS 11.0, *) {
-            webview.scrollView.contentInsetAdjustmentBehavior = .never
+            webview.scrollView.contentInsetAdjustmentBehavior = .automatic
         }
         
         // 3. 设置窗口背景色（支持深色模式）
