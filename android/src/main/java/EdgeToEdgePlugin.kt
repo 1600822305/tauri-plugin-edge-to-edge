@@ -5,9 +5,11 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.webkit.WebView
+import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsAnimationCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.JSObject
@@ -23,6 +25,7 @@ class EdgeToEdgePlugin(private val activity: Activity): Plugin(activity) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var webView: WebView? = null
     private var cachedInsets = SafeAreaInsets(0, 0, 0, 0)
+    private var lastKeyboardVisible = false
     
     data class SafeAreaInsets(val top: Int, val right: Int, val bottom: Int, val left: Int)
     
@@ -30,13 +33,84 @@ class EdgeToEdgePlugin(private val activity: Activity): Plugin(activity) {
         super.load(webView)
         this.webView = webView
         
+        // 监听 WebView 页面加载事件
+        setupWebViewCallbacks(webView)
+        
         mainHandler.post {
             setupEdgeToEdge()
             setupWindowInsets()
-            startPeriodicInjection()
+            setupKeyboardAnimationListener()  // 使用 Capacitor 风格的精确键盘监听
         }
         
         println("[EdgeToEdge] Plugin loaded successfully")
+    }
+    
+    private fun setupWebViewCallbacks(webView: WebView) {
+        webView.webViewClient = object : android.webkit.WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // 页面加载完成时重新注入安全区域
+                mainHandler.postDelayed({
+                    if (cachedInsets.top > 0 || cachedInsets.bottom > 0) {
+                        injectSafeAreaToWebView(cachedInsets)
+                        println("[EdgeToEdge] Re-injected safe area after page loaded: $url")
+                    }
+                }, 100)
+            }
+        }
+    }
+    
+    /**
+     * 设置键盘动画监听器 (借鉴 Capacitor Keyboard 官方插件)
+     * 使用 WindowInsetsAnimationCompat.Callback 实现精确的键盘动画追踪
+     */
+    private fun setupKeyboardAnimationListener() {
+        val content = activity.window.decorView.findViewById<FrameLayout>(android.R.id.content)
+        val rootView = content.rootView
+        
+        ViewCompat.setWindowInsetsAnimationCallback(
+            rootView,
+            object : WindowInsetsAnimationCompat.Callback(DISPATCH_MODE_STOP) {
+                override fun onProgress(
+                    insets: WindowInsetsCompat,
+                    runningAnimations: MutableList<WindowInsetsAnimationCompat>
+                ): WindowInsetsCompat {
+                    return insets
+                }
+                
+                override fun onStart(
+                    animation: WindowInsetsAnimationCompat,
+                    bounds: WindowInsetsAnimationCompat.BoundsCompat
+                ): WindowInsetsAnimationCompat.BoundsCompat {
+                    val windowInsets = ViewCompat.getRootWindowInsets(rootView)
+                    val isKeyboardVisible = windowInsets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false
+                    val imeHeight = windowInsets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+                    
+                    println("[EdgeToEdge] Keyboard animation start - Visible:$isKeyboardVisible, Height:$imeHeight")
+                    
+                    // 键盘将要显示/隐藏时注入
+                    injectSafeAreaToWebView(cachedInsets, isKeyboardVisible, imeHeight)
+                    
+                    return super.onStart(animation, bounds)
+                }
+                
+                override fun onEnd(animation: WindowInsetsAnimationCompat) {
+                    super.onEnd(animation)
+                    val windowInsets = ViewCompat.getRootWindowInsets(rootView)
+                    val isKeyboardVisible = windowInsets?.isVisible(WindowInsetsCompat.Type.ime()) ?: false
+                    val imeHeight = windowInsets?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+                    
+                    lastKeyboardVisible = isKeyboardVisible
+                    
+                    println("[EdgeToEdge] Keyboard animation end - Visible:$isKeyboardVisible, Height:$imeHeight")
+                    
+                    // 键盘动画结束后再次注入确保状态正确
+                    injectSafeAreaToWebView(cachedInsets, isKeyboardVisible, imeHeight)
+                }
+            }
+        )
+        
+        println("[EdgeToEdge] Keyboard animation listener setup complete (Capacitor style)")
     }
     
     private fun setupEdgeToEdge() {
@@ -72,14 +146,23 @@ class EdgeToEdgePlugin(private val activity: Activity): Plugin(activity) {
             val imeHeight = imeInsets.bottom
             val isKeyboardVisible = imeHeight > 0
             
-            cachedInsets = SafeAreaInsets(
-                top = systemBarsInsets.top,
-                right = systemBarsInsets.right,
-                bottom = systemBarsInsets.bottom,
-                left = systemBarsInsets.left
+            val newInsets = SafeAreaInsets(
+                systemBarsInsets.top,
+                systemBarsInsets.right,
+                systemBarsInsets.bottom,
+                systemBarsInsets.left
             )
             
-            injectSafeAreaToWebView(cachedInsets, isKeyboardVisible, imeHeight)
+            // 只有当 insets 真正变化时才更新
+            if (newInsets != cachedInsets || isKeyboardVisible != lastKeyboardVisible) {
+                cachedInsets = newInsets
+                lastKeyboardVisible = isKeyboardVisible
+                
+                println("[EdgeToEdge] WindowInsets changed - Top:${newInsets.top}, Bottom:${newInsets.bottom}, Keyboard:$isKeyboardVisible($imeHeight)")
+                
+                // 立即注入新的安全区域
+                injectSafeAreaToWebView(cachedInsets, isKeyboardVisible, imeHeight)
+            }
             
             val bottomPadding = if (isKeyboardVisible) maxOf(0, imeHeight - systemBarsInsets.bottom) else 0
             view.setPadding(0, 0, 0, bottomPadding)
@@ -88,21 +171,6 @@ class EdgeToEdgePlugin(private val activity: Activity): Plugin(activity) {
         }
     }
     
-    private fun startPeriodicInjection() {
-        val runnable = object : Runnable {
-            var count = 0
-            override fun run() {
-                if (count < 20) {
-                    if (cachedInsets.top > 0 || cachedInsets.bottom > 0) {
-                        injectSafeAreaToWebView(cachedInsets)
-                    }
-                    count++
-                    mainHandler.postDelayed(this, 500)
-                }
-            }
-        }
-        mainHandler.post(runnable)
-    }
     
     private fun injectSafeAreaToWebView(
         insets: SafeAreaInsets,
