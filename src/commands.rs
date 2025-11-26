@@ -27,3 +27,27 @@ pub(crate) async fn disable<R: Runtime>(
 ) -> Result<()> {
     app.edge_to_edge().disable()
 }
+
+/// 获取键盘信息
+#[command]
+pub(crate) async fn get_keyboard_info<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<KeyboardInfo> {
+    app.edge_to_edge().get_keyboard_info()
+}
+
+/// 显示键盘
+#[command]
+pub(crate) async fn show_keyboard<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<()> {
+    app.edge_to_edge().show_keyboard()
+}
+
+/// 隐藏键盘
+#[command]
+pub(crate) async fn hide_keyboard<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<()> {
+    app.edge_to_edge().hide_keyboard()
+}

@@ -37,8 +37,11 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
   Builder::new("edge-to-edge")
     .invoke_handler(tauri::generate_handler![
       commands::get_safe_area_insets,
+      commands::get_keyboard_info,
       commands::enable,
-      commands::disable
+      commands::disable,
+      commands::show_keyboard,
+      commands::hide_keyboard
     ])
     .setup(|app, api| {
       #[cfg(mobile)]
