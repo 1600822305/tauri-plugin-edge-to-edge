@@ -5,13 +5,15 @@ import WebKit
 
 // MARK: - Edge-to-Edge Plugin
 // 为 iOS 提供全屏沉浸式体验支持
-// 完美复制 Capacitor 版本的实现逻辑
+// 借鉴 Capacitor 官方 Keyboard 插件的实现逻辑
 
 class EdgeToEdgePlugin: Plugin {
     private var isSetup = false
     private weak var webviewRef: WKWebView?
     private var keyboardHeight: CGFloat = 0
     private var isKeyboardVisible = false
+    private var hideTimer: Timer?
+    private var stageManagerOffset: CGFloat = 0  // iPad Stage Manager 支持
     
     // MARK: - Lifecycle
     
@@ -23,13 +25,16 @@ class EdgeToEdgePlugin: Plugin {
         // 设置 Edge-to-Edge
         setupEdgeToEdge(webview: webview)
         
-        // 注册键盘监听
+        // 注册键盘监听（借鉴 Capacitor 官方 Keyboard 插件）
         registerKeyboardObservers(webview: webview)
+        
+        // 移除 WebView 默认的键盘监听（借鉴 Capacitor Keyboard 插件）
+        removeDefaultKeyboardObservers(webview: webview)
         
         // 周期性注入安全区域（覆盖页面加载过程）
         startPeriodicInjection(webview: webview)
         
-        NSLog("[EdgeToEdge] Plugin loaded successfully (Capacitor style)")
+        NSLog("[EdgeToEdge] Plugin loaded successfully (Capacitor Keyboard style)")
     }
     
     // MARK: - Setup
@@ -73,11 +78,21 @@ class EdgeToEdgePlugin: Plugin {
         window.rootViewController?.view.backgroundColor = window.backgroundColor
     }
     
-    // MARK: - Keyboard Observers (Capacitor Keyboard style)
+    /// 移除 WebView 默认的键盘监听（借鉴 Capacitor Keyboard 插件）
+    private func removeDefaultKeyboardObservers(webview: WKWebView) {
+        NotificationCenter.default.removeObserver(webview, name: UIResponder.keyboardWillHideNotification, object: nil)
+        NotificationCenter.default.removeObserver(webview, name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.removeObserver(webview, name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        NotificationCenter.default.removeObserver(webview, name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
+        NSLog("[EdgeToEdge] Removed default WebView keyboard observers")
+    }
+    
+    // MARK: - Keyboard Observers (借鉴 Capacitor 官方 Keyboard 插件)
     
     private func registerKeyboardObservers(webview: WKWebView) {
-        // keyboardWillShow
-        NotificationCenter.default.addObserver(
+        let nc = NotificationCenter.default
+        
+        nc.addObserver(
             forName: UIResponder.keyboardWillShowNotification,
             object: nil,
             queue: .main
@@ -86,8 +101,7 @@ class EdgeToEdgePlugin: Plugin {
             self.handleKeyboardWillShow(webview: wv, notification: notification)
         }
         
-        // keyboardDidShow
-        NotificationCenter.default.addObserver(
+        nc.addObserver(
             forName: UIResponder.keyboardDidShowNotification,
             object: nil,
             queue: .main
@@ -96,8 +110,7 @@ class EdgeToEdgePlugin: Plugin {
             self.handleKeyboardDidShow(webview: wv, notification: notification)
         }
         
-        // keyboardWillHide
-        NotificationCenter.default.addObserver(
+        nc.addObserver(
             forName: UIResponder.keyboardWillHideNotification,
             object: nil,
             queue: .main
@@ -106,8 +119,7 @@ class EdgeToEdgePlugin: Plugin {
             self.handleKeyboardWillHide(webview: wv, notification: notification)
         }
         
-        // keyboardDidHide
-        NotificationCenter.default.addObserver(
+        nc.addObserver(
             forName: UIResponder.keyboardDidHideNotification,
             object: nil,
             queue: .main
@@ -116,43 +128,90 @@ class EdgeToEdgePlugin: Plugin {
             self.handleKeyboardDidHide(webview: wv, notification: notification)
         }
         
-        NSLog("[EdgeToEdge] Keyboard observers registered (Capacitor Keyboard style)")
+        NSLog("[EdgeToEdge] Keyboard observers registered (Capacitor Keyboard official approach)")
     }
     
-    /// 键盘将要显示
+    /// 重置 ScrollView（借鉴 Capacitor Keyboard 插件的 resetScrollView）
+    private func resetScrollView(webview: WKWebView) {
+        webview.scrollView.contentInset = .zero
+        webview.scrollView.scrollIndicatorInsets = .zero
+    }
+    
+    /// 键盘将要显示（借鉴 Capacitor Keyboard 插件）
     private func handleKeyboardWillShow(webview: WKWebView, notification: Notification) {
+        // 取消隐藏定时器
+        hideTimer?.invalidate()
+        hideTimer = nil
+        
         guard let userInfo = notification.userInfo,
               let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         
-        keyboardHeight = keyboardFrame.height
+        var height = keyboardFrame.height
+        
+        // iPad Stage Manager 支持（借鉴 Capacitor Keyboard 插件）
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            if stageManagerOffset > 0 {
+                height = stageManagerOffset
+            } else if let window = webview.window {
+                let screen = window.screen
+                let webViewAbsolute = webview.convert(webview.frame, to: screen.coordinateSpace)
+                height = (webViewAbsolute.size.height + webViewAbsolute.origin.y) - (screen.bounds.size.height - keyboardFrame.size.height)
+                if height < 0 {
+                    height = 0
+                }
+                stageManagerOffset = height
+            }
+        }
+        
+        keyboardHeight = height
         isKeyboardVisible = true
         
-        NSLog("[EdgeToEdge] Keyboard will show - Height: \(keyboardHeight)")
-        injectSafeAreaInsets(webview: webview, keyboardHeight: keyboardHeight, keyboardVisible: true)
+        // 重置 ScrollView
+        resetScrollView(webview: webview)
+        
+        NSLog("[EdgeToEdge] Keyboard will show - Height: \(height)")
+        injectSafeAreaInsets(webview: webview, keyboardHeight: height, keyboardVisible: true)
     }
     
     /// 键盘已经显示
     private func handleKeyboardDidShow(webview: WKWebView, notification: Notification) {
+        // 重置 ScrollView
+        resetScrollView(webview: webview)
+        
         NSLog("[EdgeToEdge] Keyboard did show")
-        // 再次注入确保状态正确
         injectSafeAreaInsets(webview: webview, keyboardHeight: keyboardHeight, keyboardVisible: true)
     }
     
-    /// 键盘将要隐藏
+    /// 键盘将要隐藏（借鉴 Capacitor Keyboard 插件）
     private func handleKeyboardWillHide(webview: WKWebView, notification: Notification) {
         keyboardHeight = 0
         isKeyboardVisible = false
         
+        // 重置 ScrollView
+        resetScrollView(webview: webview)
+        
+        // 使用定时器延迟触发（借鉴 Capacitor Keyboard 插件）
+        hideTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: false) { [weak self, weak webview] _ in
+            guard let self = self, let wv = webview else { return }
+            self.injectSafeAreaInsets(webview: wv, keyboardHeight: 0, keyboardVisible: false)
+        }
+        RunLoop.current.add(hideTimer!, forMode: .common)
+        
         NSLog("[EdgeToEdge] Keyboard will hide")
-        injectSafeAreaInsets(webview: webview, keyboardHeight: 0, keyboardVisible: false)
     }
     
     /// 键盘已经隐藏 - 关键：重新恢复 Edge-to-Edge 设置
     private func handleKeyboardDidHide(webview: WKWebView, notification: Notification) {
-        NSLog("[EdgeToEdge] Keyboard did hide - Restoring Edge-to-Edge")
+        // 重置 Stage Manager offset
+        stageManagerOffset = 0
         
-        // 重新应用 Edge-to-Edge 设置，防止系统重置
+        // 重置 ScrollView（借鉴 Capacitor Keyboard 插件）
+        resetScrollView(webview: webview)
+        
+        // 重新应用 Edge-to-Edge 设置
         restoreEdgeToEdge(webview: webview)
+        
+        NSLog("[EdgeToEdge] Keyboard did hide - Edge-to-Edge restored")
         
         // 注入安全区域
         injectSafeAreaInsets(webview: webview, keyboardHeight: 0, keyboardVisible: false)
@@ -160,11 +219,13 @@ class EdgeToEdgePlugin: Plugin {
         // 延迟再次注入，确保状态完全恢复
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak webview] in
             guard let self = self, let wv = webview else { return }
+            self.resetScrollView(webview: wv)
             self.injectSafeAreaInsets(webview: wv, keyboardHeight: 0, keyboardVisible: false)
         }
         
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self, weak webview] in
             guard let self = self, let wv = webview else { return }
+            self.resetScrollView(webview: wv)
             self.injectSafeAreaInsets(webview: wv, keyboardHeight: 0, keyboardVisible: false)
         }
     }
@@ -180,8 +241,6 @@ class EdgeToEdgePlugin: Plugin {
         // 重置 scrollView 的 contentInset
         webview.scrollView.contentInset = .zero
         webview.scrollView.scrollIndicatorInsets = .zero
-        
-        NSLog("[EdgeToEdge] Edge-to-Edge settings restored")
     }
     
     // MARK: - Periodic Injection
