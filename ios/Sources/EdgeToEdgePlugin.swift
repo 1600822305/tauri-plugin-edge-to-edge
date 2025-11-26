@@ -137,7 +137,7 @@ class EdgeToEdgePlugin: Plugin {
         webview.scrollView.scrollIndicatorInsets = .zero
     }
     
-    /// 键盘将要显示（借鉴 NextChat 平滑处理 + Capacitor 官方 Keyboard 插件）
+    /// 键盘将要显示（借鉴 tauri-plugin-virtual-keyboard + Capacitor 官方 Keyboard 插件）
     private func handleKeyboardWillShow(webview: WKWebView, notification: Notification) {
         // 取消隐藏定时器
         hideTimer?.invalidate()
@@ -147,6 +147,9 @@ class EdgeToEdgePlugin: Plugin {
               let keyboardFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         
         var height = keyboardFrame.height
+        
+        // 获取动画时长（借鉴 tauri-plugin-virtual-keyboard）
+        let duration = userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
         
         // iPad Stage Manager 支持（借鉴 Capacitor Keyboard 插件）
         if UIDevice.current.userInterfaceIdiom == .pad {
@@ -166,10 +169,13 @@ class EdgeToEdgePlugin: Plugin {
         keyboardHeight = height
         isKeyboardVisible = true
         
-        NSLog("[EdgeToEdge] Keyboard will show - Height: \(height)")
+        NSLog("[EdgeToEdge] Keyboard will show - Height: \(height), Duration: \(duration)")
         
-        // 温和的重置：只在键盘完全显示时重置，减少动画期间的干扰
-        injectSafeAreaInsets(webview: webview, keyboardHeight: height, keyboardVisible: true)
+        // 触发键盘事件，包含动画时长（借鉴 tauri-plugin-virtual-keyboard）
+        triggerKeyboardEvent(webview: webview, eventName: "keyboardWillShow", height: height, duration: duration)
+        
+        // 注入安全区域
+        injectSafeAreaInsets(webview: webview, keyboardHeight: height, keyboardVisible: true, duration: duration)
     }
     
     /// 键盘已经显示
@@ -181,22 +187,25 @@ class EdgeToEdgePlugin: Plugin {
         injectSafeAreaInsets(webview: webview, keyboardHeight: keyboardHeight, keyboardVisible: true)
     }
     
-    /// 键盘将要隐藏（借鉴 Capacitor Keyboard 插件）
+    /// 键盘将要隐藏（借鉴 tauri-plugin-virtual-keyboard + Capacitor Keyboard 插件）
     private func handleKeyboardWillHide(webview: WKWebView, notification: Notification) {
+        // 获取动画时长（借鉴 tauri-plugin-virtual-keyboard）
+        let userInfo = notification.userInfo
+        let duration = userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+        
         keyboardHeight = 0
         isKeyboardVisible = false
+        
+        NSLog("[EdgeToEdge] Keyboard will hide - Duration: \(duration)")
+        
+        // 触发键盘事件，包含动画时长
+        triggerKeyboardEvent(webview: webview, eventName: "keyboardWillHide", height: 0, duration: duration)
         
         // 重置 ScrollView
         resetScrollView(webview: webview)
         
-        // 使用定时器延迟触发（借鉴 Capacitor Keyboard 插件）
-        hideTimer = Timer.scheduledTimer(withTimeInterval: 0.01, repeats: false) { [weak self, weak webview] _ in
-            guard let self = self, let wv = webview else { return }
-            self.injectSafeAreaInsets(webview: wv, keyboardHeight: 0, keyboardVisible: false)
-        }
-        RunLoop.current.add(hideTimer!, forMode: .common)
-        
-        NSLog("[EdgeToEdge] Keyboard will hide")
+        // 注入安全区域，包含动画时长
+        injectSafeAreaInsets(webview: webview, keyboardHeight: 0, keyboardVisible: false, duration: duration)
     }
     
     /// 键盘已经隐藏 - 关键：重新恢复 Edge-to-Edge 设置
@@ -242,6 +251,18 @@ class EdgeToEdgePlugin: Plugin {
         webview.scrollView.scrollIndicatorInsets = .zero
     }
     
+    // MARK: - Keyboard Events (借鉴 tauri-plugin-virtual-keyboard)
+    
+    /// 触发键盘事件到前端（借鉴 tauri-plugin-virtual-keyboard）
+    private func triggerKeyboardEvent(webview: WKWebView, eventName: String, height: CGFloat, duration: Double) {
+        let jsCode = """
+        window.dispatchEvent(new CustomEvent('\(eventName)', {
+            detail: { height: \(height), duration: \(duration) }
+        }));
+        """
+        webview.evaluateJavaScript(jsCode, completionHandler: nil)
+    }
+    
     // MARK: - Periodic Injection
     
     private func startPeriodicInjection(webview: WKWebView) {
@@ -255,7 +276,7 @@ class EdgeToEdgePlugin: Plugin {
     
     // MARK: - Safe Area Injection
     
-    private func injectSafeAreaInsets(webview: WKWebView, keyboardHeight: CGFloat, keyboardVisible: Bool) {
+    private func injectSafeAreaInsets(webview: WKWebView, keyboardHeight: CGFloat, keyboardVisible: Bool, duration: Double = 0.25) {
         guard #available(iOS 11.0, *) else { return }
         
         let safeArea = webview.window?.safeAreaInsets ?? .zero
@@ -268,7 +289,7 @@ class EdgeToEdgePlugin: Plugin {
         let computedBottom: CGFloat
         if keyboardVisible {
             // 键盘显示时：紧贴输入框，不添加额外 padding
-            computedBottom = bottom
+            computedBottom = 0
         } else {
             // 键盘隐藏时：确保最小安全区域（iPhone X 等有 Home Indicator）
             computedBottom = max(bottom, 34.0)
@@ -290,8 +311,17 @@ class EdgeToEdgePlugin: Plugin {
             style.setProperty('--content-bottom-padding', '\(computedBottom)px');
             style.setProperty('--keyboard-height', '\(keyboardHeight)px');
             style.setProperty('--keyboard-visible', '\(keyboardVisible ? "1" : "0")');
+            style.setProperty('--keyboard-animation-duration', '\(duration)s');
             window.dispatchEvent(new CustomEvent('safeAreaChanged', {
-                detail: { top: \(top), right: \(right), bottom: \(computedBottom), left: \(left), keyboardHeight: \(keyboardHeight), keyboardVisible: \(keyboardVisible) }
+                detail: { 
+                    top: \(top), 
+                    right: \(right), 
+                    bottom: \(computedBottom), 
+                    left: \(left), 
+                    keyboardHeight: \(keyboardHeight), 
+                    keyboardVisible: \(keyboardVisible),
+                    duration: \(duration)
+                }
             }));
         })();
         """
