@@ -306,14 +306,14 @@ class EdgeToEdgePlugin: Plugin, UIScrollViewDelegate {
             var style = document.documentElement.style;
             style.setProperty('--safe-area-inset-top', '\(top)px');
             style.setProperty('--safe-area-inset-right', '\(right)px');
-            style.setProperty('--safe-area-inset-bottom', '\(bottom)px');
+            style.setProperty('--safe-area-inset-bottom', '\(computedBottom)px');
             style.setProperty('--safe-area-inset-left', '\(left)px');
             style.setProperty('--safe-area-top', '\(top)px');
             style.setProperty('--safe-area-right', '\(right)px');
             style.setProperty('--safe-area-bottom', '\(computedBottom)px');
             style.setProperty('--safe-area-left', '\(left)px');
             style.setProperty('--safe-area-bottom-computed', '\(computedBottom)px');
-            style.setProperty('--safe-area-bottom-min', '34px');
+            style.setProperty('--safe-area-bottom-min', '\(keyboardVisible ? 0 : 34)px');
             style.setProperty('--content-bottom-padding', '\(computedBottom)px');
             style.setProperty('--keyboard-height', '\(keyboardHeight)px');
             style.setProperty('--keyboard-visible', '\(keyboardVisible ? "1" : "0")');
