@@ -290,13 +290,14 @@ class EdgeToEdgePlugin: Plugin, UIScrollViewDelegate {
         let bottom = safeArea.bottom
         let left = safeArea.left
         
-        // 键盘显示时，底部使用实际安全区域；键盘隐藏时，确保最小安全区域
+        // 键盘显示时，底部安全区域为0（键盘已覆盖Home Indicator）
+        // 键盘隐藏时，确保最小安全区域（iPhone X 等有 Home Indicator）
         let computedBottom: CGFloat
         if keyboardVisible {
-            // 键盘显示时：紧贴输入框，不添加额外 padding
-            computedBottom = bottom
+            // 键盘显示时：紧贴输入框，底部安全区域为0
+            computedBottom = 0
         } else {
-            // 键盘隐藏时：确保最小安全区域（iPhone X 等有 Home Indicator）
+            // 键盘隐藏时：确保最小安全区域
             computedBottom = max(bottom, 34.0)
         }
         
