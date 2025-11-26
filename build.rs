@@ -1,4 +1,4 @@
-const COMMANDS: &[&str] = &["ping"];
+const COMMANDS: &[&str] = &["get_safe_area_insets", "enable", "disable"];
 
 fn main() {
   tauri_plugin::Builder::new(COMMANDS)

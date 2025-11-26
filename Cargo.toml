@@ -1,9 +1,15 @@
 [package]
 name = "tauri-plugin-edge-to-edge"
 version = "0.1.0"
-authors = [ "You" ]
-description = ""
 edition = "2021"
+authors = ["1600822305 <1600822305@qq.com>"]
+license = "MIT"
+description = "Tauri plugin for iOS/Android Edge-to-Edge fullscreen support with safe area injection"
+homepage = "https://github.com/1600822305/tauri-plugin-edge-to-edge"
+repository = "https://github.com/1600822305/tauri-plugin-edge-to-edge"
+documentation = "https://github.com/1600822305/tauri-plugin-edge-to-edge/blob/main/README.md"
+keywords = ["tauri", "plugin", "edge-to-edge", "mobile", "safe-area"]
+categories = ["gui", "api-bindings", "web-programming"]
 rust-version = "1.77.2"
 exclude = ["/examples", "/dist-js", "/guest-js", "/node_modules"]
 links = "tauri-plugin-edge-to-edge"
